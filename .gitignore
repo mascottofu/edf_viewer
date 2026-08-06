@@ -1,0 +1,44 @@
+# ── 資料：一律不進版控 ─────────────────────────────
+# data/ 裡是指向 Google Drive 的 symlink，指的是 70–90 MB 的原始檔。
+# 資料本身在 Drive 有備份，git 只該管程式碼。
+data/
+
+# 生理訊號原始檔（萬一有人直接放進來）
+*.edf
+*.EDF
+*.raw
+*.RAW
+*.bdf
+*.BDF
+
+# 受測者資料與統計輸出
+*.xlsx
+*.xls
+*.csv
+*.docx
+*.sav
+
+# ── 產生物：可以重跑出來的東西不留 ──────────────────
+yasa_report/
+sleep_report_*.html
+*.png
+*.pdf
+
+# ── Python ────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# ── 機密 ──────────────────────────────────────────
+# 這個 repo 目前沒有 key，但先擋著，避免哪天不小心加進來
+.env
+*.key
+secrets*
+*api_key*
+
+# ── macOS / 編輯器 ────────────────────────────────
+.DS_Store
+.vscode/
+.idea/

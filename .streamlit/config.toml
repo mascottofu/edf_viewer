@@ -1,0 +1,8 @@
+[server]
+# 全夜 PSG 的 EDF 約 70–95 MB，K&Y 的 .RAW 可到 200 MB 以上，
+# 預設的 200 MB 上限不夠用。
+maxUploadSize = 2048
+maxMessageSize = 2048
+
+[browser]
+gatherUsageStats = false
