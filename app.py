@@ -19,6 +19,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import epoch_metrics as emx  # noqa: E402
 import sleep_report as rpt  # noqa: E402
 import staging  # noqa: E402
 from readers import Recording  # noqa: E402
@@ -133,9 +134,22 @@ except Exception as e:  # noqa: BLE001
     tech = None
 auto = staging.cached_auto(path)
 
+
+@st.cache_data(show_spinner=False)
+def load_metrics(path, mtime, start):
+    return emx.load(path, start)
+
+
+try:
+    metrics, metrics_why = load_metrics(path, stt.st_mtime, rec.meas_date)
+except Exception as e:  # noqa: BLE001
+    metrics, metrics_why = None, f"讀取失敗：{e}"
+
 st.sidebar.markdown("**睡眠分期**")
 st.sidebar.caption(f"技師：{tech.source if tech else '— 找不到判讀檔'}")
 st.sidebar.caption(f"自動：{'YASA（已快取）' if auto else '— 尚未執行'}")
+st.sidebar.markdown("**逐-epoch 生理指標**")
+st.sidebar.caption(f"{metrics.source}（{metrics_why}）" if metrics else f"— {metrics_why}")
 if st.sidebar.button("執行自動判期（YASA）", width="stretch"):
     bar = st.sidebar.progress(0.0, "讀取訊號…")
     try:
@@ -279,6 +293,36 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ---------------------------------------------------------------- 逐-epoch 指標
+
+if metrics is not None:
+    show_metrics = st.sidebar.checkbox("顯示逐-epoch 生理指標", True)
+    ln_as_linear = st.sidebar.checkbox("ln 欄位換算成線性值", False,
+                                       help="delta/theta/alpha/beta/TP/HF/LF/EOG/EMG "
+                                            "在廠商檔裡是 ln 值，勾起來會顯示 exp() 後的數值")
+else:
+    show_metrics = ln_as_linear = False
+
+if show_metrics:
+    row = metrics.at(t0)
+    if row is None:
+        st.caption(f"這個 epoch 超出廠商指標檔的範圍（該檔只到 {metrics.n} 格）。")
+    else:
+        cols = [c for c in metrics.columns if row.get(c) is not None]
+        per_line = 9
+        for k in range(0, len(cols), per_line):
+            cs = st.columns(min(per_line, len(cols) - k))
+            for col, name in zip(cs, cols[k:k + per_line]):
+                v = row[name]
+                if ln_as_linear and metrics.is_ln(name):
+                    v, unit = np.exp(v), metrics.units[name].replace("ln(", "").rstrip(")")
+                else:
+                    unit = metrics.units[name]
+                txt = f"{v:,.4g}" if abs(v) < 1e5 else f"{v:,.0f}"
+                col.metric(name, txt, help=f"{metrics.note(name)}（{unit}）".strip("（）"))
+        st.caption(f"來源：{metrics.source} —— 廠商軟體算好的每 30 秒指標，"
+                   f"與既有分析同一把尺。缺值（`-`）的欄位不顯示。")
+
 # ---------------------------------------------------------------- hypnogram
 
 if show_hyp and not tech:
@@ -404,6 +448,34 @@ def show_report():
         rows.append(r)
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
     st.caption("W 的百分比以 TIB 為分母，其餘各期以 TST 為分母。")
+
+    if metrics is not None:
+        st.markdown("**逐-epoch 生理指標趨勢**")
+        default = [c for c in ("delta", "alpha", "LF/HF", "EMG", "ACT") if c in metrics.columns]
+        picks_m = st.multiselect("指標", metrics.columns, default=default or metrics.columns[:3],
+                                 key="metric_trend")
+        if picks_m:
+            hrs = np.arange(metrics.n) * emx.EPOCH / 3600
+            mf = make_subplots(rows=len(picks_m), cols=1, shared_xaxes=True,
+                               vertical_spacing=0.03,
+                               subplot_titles=[f"{c}（{metrics.units[c]}）" for c in picks_m])
+            for r, c in enumerate(picks_m, start=1):
+                y = metrics.series(c)
+                if ln_as_linear and metrics.is_ln(c):
+                    y = np.exp(y)
+                mf.add_trace(go.Scattergl(x=hrs, y=y, mode="lines", line=dict(width=0.9),
+                                          name=c, connectgaps=False), row=r, col=1)
+                mf.update_yaxes(tickfont_size=9, row=r, col=1)
+            mf.add_vline(x=t0 / 3600, line_color="#2a9d8f", line_width=2, line_dash="dot")
+            mf.update_layout(height=150 * len(picks_m) + 40, showlegend=False,
+                             margin=dict(l=60, r=16, t=28, b=36),
+                             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+            mf.update_annotations(font_size=11)
+            mf.update_xaxes(title_text="小時", row=len(picks_m), col=1,
+                            showgrid=True, gridcolor="rgba(128,128,128,.15)")
+            st.plotly_chart(mf, use_container_width=True, config={"displaylogo": False})
+            st.caption(f"來源 {metrics.source}，共 {metrics.n} 格；綠虛線 = 目前檢視位置。"
+                       f"缺值處線會斷開。")
 
     st.markdown("**各階段 EEG 功率頻譜**")
     sp = cached_spectra(path, stt.st_mtime, tuple((tech or auto).stages))
