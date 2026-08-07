@@ -136,12 +136,18 @@ auto = staging.cached_auto(path)
 
 
 @st.cache_data(show_spinner=False)
-def load_metrics(path, mtime, start):
-    return emx.load(path, start)
+def metrics_index():
+    return emx.load_index()
 
 
+@st.cache_data(show_spinner="讀取逐-epoch 指標…")
+def load_metrics(path, mtime, start, _index):
+    return emx.load(path, start, _index)
+
+
+_idx = metrics_index()
 try:
-    metrics, metrics_why = load_metrics(path, stt.st_mtime, rec.meas_date)
+    metrics, metrics_why = load_metrics(path, stt.st_mtime, rec.meas_date, _idx)
 except Exception as e:  # noqa: BLE001
     metrics, metrics_why = None, f"讀取失敗：{e}"
 
@@ -150,6 +156,14 @@ st.sidebar.caption(f"技師：{tech.source if tech else '— 找不到判讀檔'
 st.sidebar.caption(f"自動：{'YASA（已快取）' if auto else '— 尚未執行'}")
 st.sidebar.markdown("**逐-epoch 生理指標**")
 st.sidebar.caption(f"{metrics.source}（{metrics_why}）" if metrics else f"— {metrics_why}")
+if st.sidebar.button("重建 input_folder 索引", width="stretch",
+                     help=f"掃描 {emx.INPUT_ROOT} 底下所有 xlsx。約需 3 分鐘，"
+                          f"只有資料夾內容變動時才需要重跑"):
+    bar = st.sidebar.progress(0.0, "掃描中…")
+    emx.build_index(progress=lambda f: bar.progress(f, "掃描中…"))
+    metrics_index.clear()
+    load_metrics.clear()
+    st.rerun()
 if st.sidebar.button("執行自動判期（YASA）", width="stretch"):
     bar = st.sidebar.progress(0.0, "讀取訊號…")
     try:
@@ -315,13 +329,13 @@ if show_metrics:
             for col, name in zip(cs, cols[k:k + per_line]):
                 v = row[name]
                 if ln_as_linear and metrics.is_ln(name):
-                    v, unit = np.exp(v), metrics.units[name].replace("ln(", "").rstrip(")")
+                    v, unit = np.exp(v), metrics.unit(name).replace("ln(", "").rstrip(")")
                 else:
-                    unit = metrics.units[name]
+                    unit = metrics.unit(name)
                 txt = f"{v:,.4g}" if abs(v) < 1e5 else f"{v:,.0f}"
                 col.metric(name, txt, help=f"{metrics.note(name)}（{unit}）".strip("（）"))
-        st.caption(f"來源：{metrics.source} —— 廠商軟體算好的每 30 秒指標，"
-                   f"與既有分析同一把尺。缺值（`-`）的欄位不顯示。")
+        st.caption(f"來源：`{metrics.source}`（{metrics_why}）—— 廠商軟體算好的每 30 秒"
+                   f"指標，與既有分析同一把尺。缺值的欄位不顯示。")
 
 # ---------------------------------------------------------------- hypnogram
 
@@ -458,7 +472,7 @@ def show_report():
             hrs = np.arange(metrics.n) * emx.EPOCH / 3600
             mf = make_subplots(rows=len(picks_m), cols=1, shared_xaxes=True,
                                vertical_spacing=0.03,
-                               subplot_titles=[f"{c}（{metrics.units[c]}）" for c in picks_m])
+                               subplot_titles=[f"{c}（{metrics.unit(c)}）" for c in picks_m])
             for r, c in enumerate(picks_m, start=1):
                 y = metrics.series(c)
                 if ln_as_linear and metrics.is_ln(c):
